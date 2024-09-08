@@ -1,0 +1,107 @@
+from google.colab import files
+import pandas as pd
+uploaded = files.upload()
+from google.colab import files
+import pandas as pd
+uploaded = files.upload()
+
+import pandas as pd
+import geopandas as gpd
+from shapely.geometry import Point
+
+# Load the crocodile sightings data (first dataset)
+croc_df = pd.read_excel('Crocodile_Survey_Data_2021_22.xlsx')  # Replace with your actual CSV file path
+
+# Load the zone data (second dataset, shapefile)
+zone_gdf = gpd.read_file('NT_Croc_Capture_Zones.shp')  # Replace with the actual shapefile path
+
+# Convert the latitude and longitude in the crocodile data into Point geometries
+# Create GeoDataFrame for crocodile sightings
+croc_gdf = gpd.GeoDataFrame(
+    croc_df, 
+    geometry=gpd.points_from_xy(croc_df['Longitude'], croc_df['Latitude__']), 
+    crs="EPSG:4326"  # Assuming WGS 84 as the coordinate system
+)
+
+# Ensure the CRS of both datasets are the same
+if croc_gdf.crs != zone_gdf.crs:
+    croc_gdf = croc_gdf.to_crs(zone_gdf.crs)
+
+# Perform a spatial join to assign the ZONENAME from the second dataset (zones) to the sightings based on location
+croc_with_zone = gpd.sjoin(
+    croc_gdf, 
+    zone_gdf[['ZONENAME', 'geometry']], 
+    how="left", 
+    predicate="within"  # Updated from 'op' to 'predicate'
+)
+
+# Now, 'ZONENAME' from zone_gdf is in croc_with_zone['ZONENAME']
+
+# Drop latitude, longitude, and geometry columns, keeping ZONENAME
+columns_to_drop = ['geometry', 'Latitude__', 'Longitude']
+croc_with_zone = croc_with_zone.drop(columns=columns_to_drop)
+
+# Keep relevant columns in the final dataframe
+final_croc_df = croc_with_zone[['Species_ORIGINAL', 'Species', 'Size (feet)', 'Position', 'UTC_Date', 'ZONENAME']]
+
+# Save the updated dataset to a new CSV file
+final_croc_df.to_csv('crocodile_sightings_with_zones.csv', index=False)
+
+print("Data saved to 'crocodile_sightings_with_zones.csv'")
+
+
+final_croc_df
+
+import pandas as pd
+from sklearn.model_selection import train_test_split
+from sklearn.ensemble import RandomForestClassifier
+from sklearn.preprocessing import LabelEncoder
+from sklearn.metrics import accuracy_score
+
+df = final_croc_df
+df = df[df['ZONENAME'].isin([0, 1])]
+
+
+# Step 1: Preprocess the data
+# Convert 'UTC_Date' to datetime and extract day, month, year
+df['UTC_Date'] = pd.to_datetime(df['UTC_Date'])
+df['Day'] = df['UTC_Date'].dt.day
+df['Month'] = df['UTC_Date'].dt.month
+df['Year'] = df['UTC_Date'].dt.year
+
+# Convert categorical columns to numerical (using LabelEncoder)
+label_encoder = LabelEncoder()
+df['Species'] = label_encoder.fit_transform(df['Species'])
+df['Position'] = label_encoder.fit_transform(df['Position'])
+df['ZONENAME'] = label_encoder.fit_transform(df['ZONENAME'])  # Encode 'Management Zone' and 'Outside Management Zone'
+
+# Drop 'UTC_Date' and 'Species_ORIGINAL' columns (not needed)
+df = df.drop(columns=['UTC_Date', 'Species_ORIGINAL'])
+
+# Step 2: Define features (X) and target (y)
+X = df[['Species', 'Size (feet)', 'Position', 'Day', 'Month', 'Year']]
+y = df['ZONENAME']
+
+# Step 3: Split the data into training and testing sets (70% train, 30% test)
+X_train, X_test, y_train, y_test = train_test_split(X, y, test_size=0.3, random_state=42)
+
+# Step 4: Train a Random Forest Classifier
+model = RandomForestClassifier(random_state=42)
+model.fit(X_train, y_train)
+
+# Step 5: Make predictions on the test set
+y_pred = model.predict(X_test)
+
+# Step 6: Evaluate the model (using accuracy score)
+accuracy = accuracy_score(y_test, y_pred)
+print(f'Accuracy: {accuracy * 100:.2f}%')
+
+# Show predictions vs actual values
+predictions = pd.DataFrame({'Actual': y_test, 'Predicted': y_pred})
+print(predictions)
+
+# Optional: Save the trained model for future use
+# import joblib
+# joblib.dump(model, 'management_zone_prediction_model.pkl')
+
+print("Model training complete.")
